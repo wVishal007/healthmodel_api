@@ -1,6 +1,23 @@
 from fastapi import FastAPI
 import joblib
 import pandas as pd
+from fastapi.middleware.cors import CORSMiddleware
+
+# Init FastAPI
+app = FastAPI()
+
+
+origins = [
+    "https://disease-predict-two.vercel.app/"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # list of allowed origins, e.g., ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],    # GET, POST, PUT, DELETE, OPTIONS
+    allow_headers=["*"],    # allow all headers
+)
 
 # Load encoders and model
 model_OE = joblib.load('encoder.joblib')
@@ -10,8 +27,7 @@ model_DISEASE = joblib.load('DiseasePredictModel.joblib')
 # Get class names from label encoder
 class_names = model_LE.classes_
 
-# Init FastAPI
-app = FastAPI()
+
 
 @app.get("/")
 def home():
