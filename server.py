@@ -1,42 +1,65 @@
 from fastapi import FastAPI
-import joblib
+from pydantic import BaseModel
 import pandas as pd
+import numpy as np
+import joblib
 from fastapi.middleware.cors import CORSMiddleware
 
-# Init FastAPI
+# ------------------------
+# 1. Initialize FastAPI
+# ------------------------
 app = FastAPI()
 
-
+# Allow frontend access
 origins = [
-    "https://disease-predict-two.vercel.app/"
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://disease-predict-two.vercel.app"
 ]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # list of allowed origins, e.g., ["http://localhost:3000"]
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],    # GET, POST, PUT, DELETE, OPTIONS
-    allow_headers=["*"],    # allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Load encoders and model
-model_OE = joblib.load('encoder.joblib')
-model_LE = joblib.load('label_encoder.joblib')
-model_DISEASE = joblib.load('DiseasePredictModel.joblib')
+# ------------------------
+# 2. Load trained model + encoders
+# ------------------------
+model_DISEASE = joblib.load("DiseasePredictModel.joblib")
+model_OE = joblib.load("encoder.joblib")
+model_LE = joblib.load("label_encoder.joblib")
 
-# Get class names from label encoder
-class_names = model_LE.classes_
+# Define columns
+categorical_cols = ["Fever", "Cough", "Fatigue", "Difficulty Breathing",
+                    "Gender", "Blood Pressure", "Cholesterol Level"]
+numeric_cols = ["Age"]
 
-
+# ------------------------
+# 3. Response model
+# ------------------------
+class PredictionResponse(BaseModel):
+    prediction: str
 
 @app.get("/")
 def home():
     return {"message": "Disease Prediction API is running 🚀"}
 
-@app.post("/predict")
+# ------------------------
+# 4. Prediction Endpoint
+# ------------------------
+# ------------------------
+# 3. Response model (updated)
+# ------------------------
+class PredictionResponse(BaseModel):
+    top_diseases: list
+
+
+@app.post("/predict", response_model=PredictionResponse)
 def predict(symptoms: dict):
     """
-    Example input (JSON):
+    Example input:
     {
         "Fever": "Yes",
         "Cough": "No",
@@ -50,13 +73,25 @@ def predict(symptoms: dict):
     """
     input_df = pd.DataFrame([symptoms])
 
-    # Transform input
-    input_encoded = model_OE.transform(input_df).toarray()
+    # Encode categorical + keep numeric
+    encoded_cats = model_OE.transform(input_df[categorical_cols]).toarray()
+    numerics = input_df[numeric_cols].values
 
-    # Predict
-    prediction = model_DISEASE.predict(input_encoded)[0]
+    # Merge back
+    input_encoded = np.concatenate([encoded_cats, numerics], axis=1)
 
-    # Decode label
-    predicted_label = model_LE.inverse_transform([prediction])[0]
+    # Predict probabilities for all classes
+    probs = model_DISEASE.predict_proba(input_encoded)[0]
 
-    return {"prediction": predicted_label}
+    # Get top 3 classes
+    top_indices = np.argsort(probs)[-3:][::-1]  # highest 3
+    top_labels = model_LE.inverse_transform(top_indices)
+    top_probs = probs[top_indices]
+
+    # Combine into a nice list
+    top_diseases = [
+        {"disease": label, "probability": float(f"{prob*100:.2f}")}
+        for label, prob in zip(top_labels, top_probs)
+    ]
+
+    return {"top_diseases": top_diseases}
